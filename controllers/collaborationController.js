@@ -14,6 +14,7 @@ const createNotification = async (userId, title, message, type, link) => {
 };
 
 // @POST /api/collaborations — Application accept hone par create
+// @POST /api/collaborations — Application accept hone par create
 const createCollaboration = async (req, res) => {
   try {
     const { applicationId } = req.body;
@@ -25,12 +26,10 @@ const createCollaboration = async (req, res) => {
       return res.status(404).json({ message: 'Application not found' });
     }
 
-    // Sirf brand create kar sakta hai
     if (application.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // Already collaboration hai?
     const existing = await Collaboration.findOne({ applicationId });
     if (existing) {
       return res.status(400).json({ message: 'Collaboration already exists' });
@@ -64,13 +63,46 @@ const createCollaboration = async (req, res) => {
       creatorAmount,
     });
 
-    // Notifications
+    // ✅ Opportunity close karo
+    await Opportunity.findByIdAndUpdate(
+      application.opportunityId._id,
+      { status: 'closed' }
+    );
+
+    // ✅ Baaki sari pending applications reject karo
+    await Application.updateMany(
+      {
+        opportunityId: application.opportunityId._id,
+        _id:           { $ne: applicationId },
+        status:        { $in: ['pending', 'countered'] }
+      },
+      { status: 'rejected' }
+    );
+
+    // ✅ Rejected creators ko notification
+    const rejectedApps = await Application.find({
+      opportunityId: application.opportunityId._id,
+      _id:           { $ne: applicationId },
+      status:        'rejected'
+    });
+
+    for (const app of rejectedApps) {
+      await createNotification(
+        app.creatorId,
+        'Application Update',
+        `The opportunity "${application.opportunityId.title}" has been filled by another creator.`,
+        'application',
+        '/creator/applications'
+      );
+    }
+
+    // ✅ Selected creator ko notification
     await createNotification(
       application.creatorId,
       'Collaboration Started! 🎉',
-      `Your application has been accepted. Chat is now unlocked!`,
+      `Your application has been accepted for "${application.opportunityId.title}". Chat is now unlocked!`,
       'collaboration',
-      `/creator/collaborations`
+      '/creator/collaborations'
     );
 
     res.status(201).json(collaboration);
@@ -107,6 +139,10 @@ const getBrandCollaborations = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+
+
+
 
 // @GET /api/collaborations/admin — Admin sab dekhe
 const getAllCollaborations = async (req, res) => {
