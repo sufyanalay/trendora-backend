@@ -38,7 +38,7 @@ const sendMessage = async (req, res) => {
 
     if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' });
 
-    const userId = req.user._id.toString();
+    const userId    = req.user._id.toString();
     const isBrand   = collaboration.brandId.toString() === userId;
     const isCreator = collaboration.creatorId.toString() === userId;
 
@@ -56,6 +56,12 @@ const sendMessage = async (req, res) => {
     });
 
     const populated = await newMessage.populate('senderId', 'fullName role');
+
+    // ✅ Real time emit
+    if (global.io) {
+      global.io.to(`collab_${collaboration._id}`).emit('new_message', populated);
+    }
+
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });

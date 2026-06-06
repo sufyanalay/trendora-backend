@@ -7,7 +7,11 @@ const Notification   = require('../models/Notification');
 // Helper — notification banao
 const createNotification = async (userId, title, message, type, link) => {
   try {
-    await Notification.create({ userId, title, message, type, link });
+    const notif = await Notification.create({ userId, title, message, type, link });
+
+    if (global.io) {
+      global.io.to(userId.toString()).emit('new_notification', notif);
+    }
   } catch (err) {
     console.error('Notification error:', err.message);
   }
