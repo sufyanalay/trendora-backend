@@ -35,7 +35,7 @@ app.use('/api/payments',       require('./routes/paymentRoutes'));
 app.use('/api/messages',       require('./routes/messageRoutes'));
 app.use('/api/notifications',  require('./routes/notificationRoutes'));
 app.use('/api/admin',          require('./routes/adminRoutes'));
-
+app.use('/api/upload', require('./routes/uploadRoutes'));
 app.get('/', (req, res) => res.send('Trendora API Running...'));
 
 // Socket.io connection

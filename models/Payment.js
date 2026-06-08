@@ -14,7 +14,7 @@ const paymentSchema = new mongoose.Schema({
   screenshotUrl:      { type: String },
   brandJazzCash:      { type: String },
   paymentNote:        { type: String },
-
+  transactionId: { type: String },
   // Creator payment info
   creatorJazzCash:    { type: String },
 

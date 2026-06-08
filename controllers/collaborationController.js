@@ -4,11 +4,9 @@ const Opportunity    = require('../models/Opportunity');
 const Payment        = require('../models/Payment');
 const Notification   = require('../models/Notification');
 
-// Helper — notification banao
 const createNotification = async (userId, title, message, type, link) => {
   try {
     const notif = await Notification.create({ userId, title, message, type, link });
-
     if (global.io) {
       global.io.to(userId.toString()).emit('new_notification', notif);
     }
@@ -17,8 +15,7 @@ const createNotification = async (userId, title, message, type, link) => {
   }
 };
 
-// @POST /api/collaborations — Application accept hone par create
-// @POST /api/collaborations — Application accept hone par create
+// @POST /api/collaborations — Brand accept kare
 const createCollaboration = async (req, res) => {
   try {
     const { applicationId } = req.body;
@@ -29,7 +26,6 @@ const createCollaboration = async (req, res) => {
     if (!application) {
       return res.status(404).json({ message: 'Application not found' });
     }
-
     if (application.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
@@ -39,11 +35,11 @@ const createCollaboration = async (req, res) => {
       return res.status(400).json({ message: 'Collaboration already exists' });
     }
 
-    // Application accept karo
+    // Application accept
     application.status = 'accepted';
     await application.save();
 
-    // Collaboration banao
+    // Collaboration banao — status: payment_pending
     const collaboration = await Collaboration.create({
       opportunityId: application.opportunityId._id,
       applicationId: application._id,
@@ -51,6 +47,8 @@ const createCollaboration = async (req, res) => {
       creatorId:     application.creatorId,
       agreedAmount:  application.counterAmount || application.opportunityId.budget,
       deadline:      application.opportunityId.deadline,
+      status:        'payment_pending',
+      chatUnlocked:  false,
     });
 
     // Payment record banao
@@ -67,13 +65,13 @@ const createCollaboration = async (req, res) => {
       creatorAmount,
     });
 
-    // ✅ Opportunity close karo
+    // Opportunity close
     await Opportunity.findByIdAndUpdate(
       application.opportunityId._id,
       { status: 'closed' }
     );
 
-    // ✅ Baaki sari pending applications reject karo
+    // Baaki applications reject
     await Application.updateMany(
       {
         opportunityId: application.opportunityId._id,
@@ -83,30 +81,28 @@ const createCollaboration = async (req, res) => {
       { status: 'rejected' }
     );
 
-    // ✅ Rejected creators ko notification
+    // Rejected creators ko notification
     const rejectedApps = await Application.find({
       opportunityId: application.opportunityId._id,
       _id:           { $ne: applicationId },
-      status:        'rejected'
     });
-
     for (const app of rejectedApps) {
       await createNotification(
         app.creatorId,
         'Application Update',
-        `The opportunity "${application.opportunityId.title}" has been filled by another creator.`,
+        `The opportunity "${application.opportunityId.title}" has been filled.`,
         'application',
         '/creator/applications'
       );
     }
 
-    // ✅ Selected creator ko notification
+    // Brand ko payment reminder
     await createNotification(
-      application.creatorId,
-      'Collaboration Started! 🎉',
-      `Your application has been accepted for "${application.opportunityId.title}". Chat is now unlocked!`,
-      'collaboration',
-      '/creator/collaborations'
+      application.brandId,
+      'Payment Required! 💳',
+      `Please complete payment of PKR ${totalAmount} to start collaboration.`,
+      'payment',
+      '/brand/payments'
     );
 
     res.status(201).json(collaboration);
@@ -116,39 +112,33 @@ const createCollaboration = async (req, res) => {
   }
 };
 
-// @GET /api/collaborations/creator — Creator ke collaborations
+// @GET /api/collaborations/creator
 const getCreatorCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find({ creatorId: req.user._id })
       .populate('opportunityId', 'title platform category')
       .populate('brandId', 'fullName brandName email')
       .sort({ createdAt: -1 });
-
     res.json(collaborations);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// @GET /api/collaborations/brand — Brand ke collaborations
+// @GET /api/collaborations/brand
 const getBrandCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find({ brandId: req.user._id })
       .populate('opportunityId', 'title platform category')
       .populate('creatorId', 'fullName email socialPlatform')
       .sort({ createdAt: -1 });
-
     res.json(collaborations);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-
-
-
-
-// @GET /api/collaborations/admin — Admin sab dekhe
+// @GET /api/collaborations/admin
 const getAllCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find()
@@ -156,24 +146,24 @@ const getAllCollaborations = async (req, res) => {
       .populate('brandId', 'fullName brandName')
       .populate('creatorId', 'fullName')
       .sort({ createdAt: -1 });
-
     res.json(collaborations);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// @PUT /api/collaborations/:id/submit — Creator work submit kare
+// @PUT /api/collaborations/:id/submit — Creator work submit
 const submitWork = async (req, res) => {
   try {
     const { submittedWork } = req.body;
     const collaboration = await Collaboration.findById(req.params.id);
 
-    if (!collaboration) {
-      return res.status(404).json({ message: 'Collaboration not found' });
-    }
+    if (!collaboration) return res.status(404).json({ message: 'Not found' });
     if (collaboration.creatorId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (!collaboration.chatUnlocked) {
+      return res.status(400).json({ message: 'Payment not verified yet' });
     }
 
     collaboration.status        = 'submitted';
@@ -181,13 +171,12 @@ const submitWork = async (req, res) => {
     collaboration.submittedAt   = new Date();
     await collaboration.save();
 
-    // Brand ko notification
     await createNotification(
       collaboration.brandId,
       'Work Submitted! 📦',
       'Creator has submitted the work. Please review and approve.',
       'collaboration',
-      `/brand/collaborations`
+      '/brand/collaborations'
     );
 
     res.json(collaboration);
@@ -196,30 +185,26 @@ const submitWork = async (req, res) => {
   }
 };
 
-// @PUT /api/collaborations/:id/approve — Brand approve kare
+// @PUT /api/collaborations/:id/approve — Brand approve
 const approveWork = async (req, res) => {
   try {
     const collaboration = await Collaboration.findById(req.params.id);
-
-    if (!collaboration) {
-      return res.status(404).json({ message: 'Collaboration not found' });
-    }
+    if (!collaboration) return res.status(404).json({ message: 'Not found' });
     if (collaboration.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    collaboration.status      = 'completed';
-    collaboration.completedAt = new Date();
+    collaboration.status        = 'completed';
+    collaboration.completedAt   = new Date();
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
-    // Creator ko notification
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
-      'Brand approved your work. Payment will be released soon.',
+      'Brand approved your work. Admin will release payment soon.',
       'payment',
-      `/creator/earnings`
+      '/creator/earnings'
     );
 
     res.json(collaboration);
@@ -233,10 +218,7 @@ const requestRevision = async (req, res) => {
   try {
     const { revisionNote } = req.body;
     const collaboration = await Collaboration.findById(req.params.id);
-
-    if (!collaboration) {
-      return res.status(404).json({ message: 'Not found' });
-    }
+    if (!collaboration) return res.status(404).json({ message: 'Not found' });
     if (collaboration.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
@@ -248,9 +230,9 @@ const requestRevision = async (req, res) => {
     await createNotification(
       collaboration.creatorId,
       'Revision Requested 🔄',
-      `Brand requested a revision: ${revisionNote}`,
+      `Brand requested changes: ${revisionNote}`,
       'collaboration',
-      `/creator/collaborations`
+      '/creator/collaborations'
     );
 
     res.json(collaboration);

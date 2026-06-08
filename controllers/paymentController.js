@@ -2,11 +2,22 @@ const Payment       = require('../models/Payment');
 const Collaboration = require('../models/Collaboration');
 const Notification  = require('../models/Notification');
 
-// @GET /api/payments/brand — Brand ke payments
+const createNotification = async (userId, title, message, type, link) => {
+  try {
+    const notif = await Notification.create({ userId, title, message, type, link });
+    if (global.io) {
+      global.io.to(userId.toString()).emit('new_notification', notif);
+    }
+  } catch (err) {
+    console.error('Notification error:', err.message);
+  }
+};
+
+// @GET /api/payments/brand
 const getBrandPayments = async (req, res) => {
   try {
     const payments = await Payment.find({ brandId: req.user._id })
-      .populate('collaborationId', 'status agreedAmount')
+      .populate('collaborationId', 'status agreedAmount opportunityId')
       .populate('creatorId', 'fullName email')
       .sort({ createdAt: -1 });
     res.json(payments);
@@ -15,7 +26,7 @@ const getBrandPayments = async (req, res) => {
   }
 };
 
-// @GET /api/payments/creator — Creator ke payments
+// @GET /api/payments/creator
 const getCreatorPayments = async (req, res) => {
   try {
     const payments = await Payment.find({ creatorId: req.user._id })
@@ -31,24 +42,36 @@ const getCreatorPayments = async (req, res) => {
 // @PUT /api/payments/:id/upload-screenshot — Brand screenshot upload kare
 const uploadScreenshot = async (req, res) => {
   try {
-    const { screenshotUrl, paymentNote, brandJazzCash } = req.body;
-    const payment = await Payment.findById(req.params.id);
+    const { screenshotUrl, transactionId, brandJazzCash, paymentNote } = req.body;
 
+    const payment = await Payment.findById(req.params.id);
     if (!payment) return res.status(404).json({ message: 'Payment not found' });
     if (payment.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
     payment.screenshotUrl = screenshotUrl;
-    payment.paymentNote   = paymentNote;
+    payment.transactionId = transactionId;
     payment.brandJazzCash = brandJazzCash;
+    payment.paymentNote   = paymentNote;
     payment.status        = 'screenshot_uploaded';
     await payment.save();
 
     // Admin ko notification
+    const admins = await require('../models/User').find({ role: 'admin' });
+    for (const admin of admins) {
+      await createNotification(
+        admin._id,
+        'Payment Screenshot Uploaded 📸',
+        `Brand uploaded payment proof of PKR ${payment.totalAmount}. Please verify.`,
+        'payment',
+        '/admin/payments'
+      );
+    }
+
     res.json({ message: 'Screenshot uploaded. Waiting for admin verification.', payment });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
@@ -63,36 +86,47 @@ const verifyPayment = async (req, res) => {
     payment.verifiedAt = new Date();
     await payment.save();
 
-    // Collaboration payment status update
+    // Collaboration active karo + chat unlock karo
     await Collaboration.findByIdAndUpdate(payment.collaborationId, {
-      paymentStatus: 'paid'
+      status:       'active',
+      chatUnlocked: true,
+      paymentStatus: 'paid',
     });
 
-    await Notification.create({
-      userId:  payment.brandId,
-      title:   'Payment Verified ✅',
-      message: 'Your payment has been verified. Creator can now start work.',
-      type:    'payment',
-    });
+    // Brand ko notification
+    await createNotification(
+      payment.brandId,
+      'Payment Verified ✅',
+      'Your payment has been verified. Collaboration is now active!',
+      'payment',
+      '/brand/collaborations'
+    );
 
-    res.json({ message: 'Payment verified', payment });
+    // Creator ko notification
+    await createNotification(
+      payment.creatorId,
+      'Collaboration Active! 🎉',
+      'Brand payment verified. You can now start working. Chat is unlocked!',
+      'collaboration',
+      '/creator/collaborations'
+    );
+
+    res.json({ message: 'Payment verified. Collaboration activated!', payment });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
 // @PUT /api/payments/:id/release — Admin creator ko release kare
 const releasePayment = async (req, res) => {
   try {
-    const { creatorJazzCash } = req.body;
     const payment = await Payment.findById(req.params.id)
-      .populate('creatorId', 'fullName email');
+      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber');
 
     if (!payment) return res.status(404).json({ message: 'Not found' });
 
-    payment.status          = 'released';
-    payment.creatorJazzCash = creatorJazzCash || payment.creatorJazzCash;
-    payment.releasedAt      = new Date();
+    payment.status     = 'released';
+    payment.releasedAt = new Date();
     await payment.save();
 
     // Collaboration update
@@ -101,27 +135,30 @@ const releasePayment = async (req, res) => {
     });
 
     // Creator ko notification
-    await Notification.create({
-      userId:  payment.creatorId._id,
-      title:   'Payment Released! 💰',
-      message: `PKR ${payment.creatorAmount?.toLocaleString()} has been sent to your JazzCash account.`,
-      type:    'payment',
-      link:    '/creator/earnings',
-    });
+    await createNotification(
+      payment.creatorId._id,
+      'Payment Released! 💰',
+      `PKR ${payment.creatorAmount?.toLocaleString()} has been sent to your JazzCash account: ${payment.creatorId.jazzCashNumber || 'N/A'}`,
+      'payment',
+      '/creator/earnings'
+    );
 
-    res.json({ message: 'Payment released to creator', payment });
+    res.json({ message: 'Payment released!', payment });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
-// @GET /api/payments/admin — Admin sab payments dekhe
+// @GET /api/payments/admin
 const getAllPayments = async (req, res) => {
   try {
     const payments = await Payment.find()
       .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName')
-      .populate('collaborationId', 'status')
+      .populate('creatorId', 'fullName jazzCashNumber easypaisaNumber')
+      .populate({
+        path: 'collaborationId',
+        populate: { path: 'opportunityId', select: 'title' }
+      })
       .sort({ createdAt: -1 });
     res.json(payments);
   } catch (err) {

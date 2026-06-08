@@ -15,7 +15,7 @@ const getMessages = async (req, res) => {
     }
 
     const messages = await Message.find({ collaborationId: req.params.collaborationId })
-      .populate('senderId', 'fullName role')
+      .populate('senderId', 'fullName role _id')  // ← _id explicitly
       .sort({ createdAt: 1 });
 
     // Mark as read
@@ -38,6 +38,11 @@ const sendMessage = async (req, res) => {
 
     if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' });
 
+    // ✅ Chat sirf unlock hone par kaam kare
+    if (!collaboration.chatUnlocked) {
+      return res.status(403).json({ message: 'Chat is locked. Payment must be verified first.' });
+    }
+
     const userId    = req.user._id.toString();
     const isBrand   = collaboration.brandId.toString() === userId;
     const isCreator = collaboration.creatorId.toString() === userId;
@@ -55,7 +60,9 @@ const sendMessage = async (req, res) => {
       message,
     });
 
-    const populated = await newMessage.populate('senderId', 'fullName role');
+    // ← findById se populate karo — _id sahi aata hai
+    const populated = await Message.findById(newMessage._id)
+      .populate('senderId', 'fullName role _id')
 
     // ✅ Real time emit
     if (global.io) {
