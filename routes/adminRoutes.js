@@ -95,30 +95,59 @@ router.get('/payments', protect, adminOnly, async (req, res) => {
 // Verify payment
 router.put('/payments/:id/verify', protect, adminOnly, async (req, res) => {
   try {
-    const payment = await Payment.findByIdAndUpdate(
-      req.params.id,
-      {
-        status:     'verified',
-        verifiedBy: req.user._id,
-        verifiedAt: new Date(),
-      },
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return res.status(404).json({ message: 'Not found' });
+
+    const brandId   = payment.brandId.toString();
+    const creatorId = payment.creatorId.toString();
+
+    payment.status     = 'verified';
+    payment.verifiedBy = req.user._id;
+    payment.verifiedAt = new Date();
+    await payment.save();
+
+    const collaboration = await Collaboration.findByIdAndUpdate(
+      payment.collaborationId,
+      { status: 'active', chatUnlocked: true, paymentStatus: 'paid' },
       { new: true }
-    )
+    );
 
-    // Brand ko notification
+    console.log('✅ chatUnlocked:', collaboration.chatUnlocked);
+
+    if (global.io) {
+      const updateData = {
+        collaborationId: collaboration._id.toString(),
+        chatUnlocked:    true,
+        status:          'active',
+      }
+      global.io.to(brandId).emit('collaboration_updated', updateData);
+      global.io.to(creatorId).emit('collaboration_updated', updateData);
+      console.log('✅ Emitted to:', brandId, creatorId);
+    }
+
     await Notification.create({
-      userId:  payment.brandId,
+      userId:  brandId,
       title:   'Payment Verified ✅',
-      message: 'Your payment has been verified. Creator can now start work.',
+      message: 'Your payment verified. Chat unlocked!',
       type:    'payment',
-      link:    '/brand/payments',
-    })
+      link:    '/brand/collaborations',
+    });
 
-    res.json(payment)
+    await Notification.create({
+      userId:  creatorId,
+      title:   'Collaboration Active! 🎉',
+      message: 'Payment verified. Chat is now unlocked!',
+      type:    'collaboration',
+      link:    '/creator/collaborations',
+    });
+
+    res.json(payment);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' })
+    console.error('verify error:', err);
+    res.status(500).json({ message: 'Server error' });
   }
-})
+});
+
 
 // Release payment
 router.put('/payments/:id/release', protect, adminOnly, async (req, res) => {

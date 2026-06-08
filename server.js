@@ -42,21 +42,22 @@ app.get('/', (req, res) => res.send('Trendora API Running...'));
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // User apne room mein join kare
   socket.on('join', (userId) => {
     socket.join(userId)
-    console.log(`User ${userId} joined their room`)
+    console.log(`User ${userId} joined room`)
   })
 
-  // Collaboration room join karo
   socket.on('join_collaboration', (collaborationId) => {
     socket.join(`collab_${collaborationId}`)
     console.log(`Joined collab room: ${collaborationId}`)
   })
 
-  // Message send
+  socket.on('leave_collaboration', (collaborationId) => {
+    socket.leave(`collab_${collaborationId}`)
+    console.log(`Left collab room: ${collaborationId}`)
+  })
+
   socket.on('send_message', (data) => {
-    // Collaboration room mein sab ko bhejo
     io.to(`collab_${data.collaborationId}`).emit('new_message', data)
   })
 
@@ -64,7 +65,6 @@ io.on('connection', (socket) => {
     console.log('User disconnected:', socket.id)
   })
 })
-
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 

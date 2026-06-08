@@ -78,6 +78,7 @@ const uploadScreenshot = async (req, res) => {
 // @PUT /api/payments/:id/verify — Admin verify kare
 const verifyPayment = async (req, res) => {
   try {
+    // ✅ Pehle payment lo bina populate ke
     const payment = await Payment.findById(req.params.id);
     if (!payment) return res.status(404).json({ message: 'Not found' });
 
@@ -86,37 +87,63 @@ const verifyPayment = async (req, res) => {
     payment.verifiedAt = new Date();
     await payment.save();
 
-    // Collaboration active karo + chat unlock karo
-    await Collaboration.findByIdAndUpdate(payment.collaborationId, {
-      status:       'active',
-      chatUnlocked: true,
-      paymentStatus: 'paid',
-    });
+    // ✅ IDs directly lo — populate mat karo
+    const brandId   = payment.brandId.toString();
+    const creatorId = payment.creatorId.toString();
 
-    // Brand ko notification
+    // Collaboration active + chat unlock
+    const collaboration = await Collaboration.findByIdAndUpdate(
+      payment.collaborationId,
+      {
+        status:        'active',
+        chatUnlocked:  true,
+        paymentStatus: 'paid',
+      },
+      { new: true }
+    );
+
+    console.log('✅ Collaboration updated:', collaboration._id.toString());
+    console.log('✅ chatUnlocked:', collaboration.chatUnlocked);
+    console.log('✅ Emitting to brandId:', brandId);
+    console.log('✅ Emitting to creatorId:', creatorId);
+
+    // ✅ Socket emit
+    if (global.io) {
+      const updateData = {
+        collaborationId: collaboration._id.toString(),
+        chatUnlocked:    true,
+        status:          'active',
+      }
+      global.io.to(brandId).emit('collaboration_updated', updateData);
+      global.io.to(creatorId).emit('collaboration_updated', updateData);
+      console.log('✅ Socket emitted successfully')
+    } else {
+      console.log('❌ global.io not found')
+    }
+
+    // Notifications
     await createNotification(
-      payment.brandId,
+      brandId,
       'Payment Verified ✅',
-      'Your payment has been verified. Collaboration is now active!',
+      'Your payment has been verified. Chat is now unlocked!',
       'payment',
       '/brand/collaborations'
     );
 
-    // Creator ko notification
     await createNotification(
-      payment.creatorId,
+      creatorId,
       'Collaboration Active! 🎉',
-      'Brand payment verified. You can now start working. Chat is unlocked!',
+      'Payment verified. Chat is now unlocked. Start working!',
       'collaboration',
       '/creator/collaborations'
     );
 
-    res.json({ message: 'Payment verified. Collaboration activated!', payment });
+    res.json({ message: 'Payment verified!', payment });
   } catch (err) {
+    console.error('verifyPayment error:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
-
 // @PUT /api/payments/:id/release — Admin creator ko release kare
 const releasePayment = async (req, res) => {
   try {

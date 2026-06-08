@@ -35,23 +35,27 @@ const sendMessage = async (req, res) => {
   try {
     const { message } = req.body;
     const collaboration = await Collaboration.findById(req.params.collaborationId);
-
     if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' });
-
-    // ✅ Chat sirf unlock hone par kaam kare
-    if (!collaboration.chatUnlocked) {
-      return res.status(403).json({ message: 'Chat is locked. Payment must be verified first.' });
-    }
 
     const userId    = req.user._id.toString();
     const isBrand   = collaboration.brandId.toString() === userId;
     const isCreator = collaboration.creatorId.toString() === userId;
+    const isAdmin   = req.user.role === 'admin';
 
-    if (!isBrand && !isCreator) {
+    if (!isBrand && !isCreator && !isAdmin) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    const receiverId = isBrand ? collaboration.creatorId : collaboration.brandId;
+    // Chat lock check — admin bypass kar sakta hai
+    if (!collaboration.chatUnlocked && !isAdmin) {
+      return res.status(403).json({ message: 'Chat is locked. Payment must be verified first.' });
+    }
+
+    // Receiver ID
+    let receiverId
+    if (isBrand)        receiverId = collaboration.creatorId
+    else if (isCreator) receiverId = collaboration.brandId
+    else                receiverId = collaboration.brandId // admin brand ko bheje default
 
     const newMessage = await Message.create({
       collaborationId: collaboration._id,
@@ -60,11 +64,9 @@ const sendMessage = async (req, res) => {
       message,
     });
 
-    // ← findById se populate karo — _id sahi aata hai
     const populated = await Message.findById(newMessage._id)
       .populate('senderId', 'fullName role _id')
 
-    // ✅ Real time emit
     if (global.io) {
       global.io.to(`collab_${collaboration._id}`).emit('new_message', populated);
     }
@@ -74,5 +76,4 @@ const sendMessage = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
 module.exports = { getMessages, sendMessage };

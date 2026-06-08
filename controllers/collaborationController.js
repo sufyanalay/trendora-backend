@@ -199,13 +199,27 @@ const approveWork = async (req, res) => {
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
+    // Creator ko notify
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
-      'Brand approved your work. Admin will release payment soon.',
+      'Brand approved your work. Admin will release your payment soon.',
       'payment',
       '/creator/earnings'
     );
+
+    // ✅ Admin ko notify — payment release karne ke liye
+    const User = require('../models/User');
+    const admins = await User.find({ role: 'admin' });
+    for (const admin of admins) {
+      await createNotification(
+        admin._id,
+        'Work Approved — Release Payment 💰',
+        `Brand approved the work. Please release payment to creator.`,
+        'payment',
+        '/admin/payments'
+      );
+    }
 
     res.json(collaboration);
   } catch (err) {
