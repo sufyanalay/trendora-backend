@@ -11,9 +11,9 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder:         'trendora/payments',
+    folder:          'trendora/payments',
     allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 1200, quality: 'auto' }],
+    transformation:  [{ width: 1200, quality: 'auto' }],
   },
 })
 

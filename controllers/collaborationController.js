@@ -162,8 +162,10 @@ const submitWork = async (req, res) => {
     if (collaboration.creatorId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
-    if (!collaboration.chatUnlocked) {
-      return res.status(400).json({ message: 'Payment not verified yet' });
+
+    // ✅ Status check karo — active ya revision hona chahiye
+    if (!['active', 'revision'].includes(collaboration.status)) {
+      return res.status(400).json({ message: 'Collaboration is not active' });
     }
 
     collaboration.status        = 'submitted';
@@ -181,7 +183,8 @@ const submitWork = async (req, res) => {
 
     res.json(collaboration);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('submitWork error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 

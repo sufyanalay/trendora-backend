@@ -100,6 +100,7 @@ const updateProfile = async (req, res) => {
       fullName, socialPlatform, socialProfileUrl,
       address, brandName, websiteUrl, brandAddress,
       jazzCashNumber, easypaisaNumber,
+      bankName, bankAccountNumber, bankAccountTitle,
     } = req.body;
 
     const user = await User.findByIdAndUpdate(
@@ -108,6 +109,7 @@ const updateProfile = async (req, res) => {
         fullName, socialPlatform, socialProfileUrl,
         address, brandName, websiteUrl, brandAddress,
         jazzCashNumber, easypaisaNumber,
+        bankName, bankAccountNumber, bankAccountTitle,
       },
       { new: true }
     ).select('-password');
@@ -117,7 +119,6 @@ const updateProfile = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
 // @PUT /api/auth/change-password
 const changePassword = async (req, res) => {
   try {

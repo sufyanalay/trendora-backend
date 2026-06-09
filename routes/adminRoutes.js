@@ -152,34 +152,48 @@ router.put('/payments/:id/verify', protect, adminOnly, async (req, res) => {
 // Release payment
 router.put('/payments/:id/release', protect, adminOnly, async (req, res) => {
   try {
-    const payment = await Payment.findByIdAndUpdate(
-      req.params.id,
-      {
-        status:     'released',
-        releasedAt: new Date(),
-      },
-      { new: true }
-    ).populate('creatorId', 'fullName')
+    const { releaseNote, releaseRef } = req.body;
 
-    // Collaboration payment status update
-    await Collaboration.findByIdAndUpdate(
-      payment.collaborationId,
-      { paymentStatus: 'released' }
-    )
+    const payment = await Payment.findById(req.params.id)
+      .populate('creatorId', 'fullName jazzCashNumber easypaisaNumber bankName bankAccountNumber bankAccountTitle');
 
-    // Creator ko notification
+    if (!payment) return res.status(404).json({ message: 'Not found' });
+
+    payment.status     = 'released';
+    payment.releasedAt = new Date();
+    await payment.save();
+
+    await Collaboration.findByIdAndUpdate(payment.collaborationId, {
+      paymentStatus: 'released'
+    });
+
+    // ✅ Creator ko notification — with admin reference
+    const paymentDetails = [
+      payment.creatorId?.jazzCashNumber ? `JazzCash: ${payment.creatorId.jazzCashNumber}` : null,
+      payment.creatorId?.easypaisaNumber ? `Easypaisa: ${payment.creatorId.easypaisaNumber}` : null,
+    ].filter(Boolean).join(' | ');
+
     await Notification.create({
       userId:  payment.creatorId._id,
-      title:   'Payment Released! 💰',
-      message: `PKR ${payment.creatorAmount?.toLocaleString()} has been sent to your account.`,
+      title:   '💰 Payment Released!',
+      message: `PKR ${payment.creatorAmount?.toLocaleString()} sent to your account. Ref: ${releaseRef}. ${releaseNote || ''}`,
       type:    'payment',
       link:    '/creator/earnings',
-    })
+    });
 
-    res.json(payment)
+    if (global.io) {
+      global.io.to(payment.creatorId._id.toString()).emit('new_notification', {
+        title:   '💰 Payment Released!',
+        message: `PKR ${payment.creatorAmount?.toLocaleString()} sent. Ref: ${releaseRef}`,
+        type:    'payment',
+      });
+    }
+
+    res.json({ message: 'Payment released!', payment });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' })
+    console.error('release error:', err);
+    res.status(500).json({ message: 'Server error' });
   }
-})
+});
 
 module.exports = router
