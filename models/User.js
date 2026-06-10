@@ -19,7 +19,9 @@ const userSchema = new mongoose.Schema({
   bankName:         { type: String },
   bankAccountNumber:{ type: String },
   bankAccountTitle: { type: String },
-
+  isVerified:         { type: Boolean, default: false },
+  verificationCode:   { type: String },
+  verificationExpire: { type: Date },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

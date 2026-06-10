@@ -4,11 +4,18 @@ const Opportunity    = require('../models/Opportunity');
 const Payment        = require('../models/Payment');
 const Notification   = require('../models/Notification');
 
+// collaborationController.js aur paymentController.js mein
 const createNotification = async (userId, title, message, type, link) => {
   try {
     const notif = await Notification.create({ userId, title, message, type, link });
+
+    // Socket emit
     if (global.io) {
       global.io.to(userId.toString()).emit('new_notification', notif);
+    }
+
+    if (['payment', 'collaboration'].includes(type)) {
+      await sendEmailNotification(userId, title, message)
     }
   } catch (err) {
     console.error('Notification error:', err.message);
@@ -202,6 +209,12 @@ const approveWork = async (req, res) => {
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
+    // ✅ Payment status bhi update karo — release ke liye ready
+    await Payment.findOneAndUpdate(
+      { collaborationId: collaboration._id },
+      { status: 'verified' }  // ← ab admin release kar sakta hai
+    );
+
     // Creator ko notify
     await createNotification(
       collaboration.creatorId,
@@ -211,13 +224,13 @@ const approveWork = async (req, res) => {
       '/creator/earnings'
     );
 
-    // ✅ Admin ko notify — payment release karne ke liye
+    // Admin ko notify
     const User = require('../models/User');
     const admins = await User.find({ role: 'admin' });
     for (const admin of admins) {
       await createNotification(
         admin._id,
-        'Work Approved — Release Payment 💰',
+        '💰 Release Payment Now',
         `Brand approved the work. Please release payment to creator.`,
         'payment',
         '/admin/payments'
@@ -226,10 +239,9 @@ const approveWork = async (req, res) => {
 
     res.json(collaboration);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
-
 // @PUT /api/collaborations/:id/revision — Brand revision maange
 const requestRevision = async (req, res) => {
   try {

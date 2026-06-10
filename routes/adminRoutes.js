@@ -79,19 +79,22 @@ router.get('/collaborations', protect, adminOnly, async (req, res) => {
 // ─── PAYMENTS ─────────────────────────────────────────
 
 // All payments
+// All payments
 router.get('/payments', protect, adminOnly, async (req, res) => {
   try {
     const payments = await Payment.find()
       .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName')
-      .populate('collaborationId', 'status agreedAmount')
+      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber bankName bankAccountNumber bankAccountTitle')  // ← ye fields add karo
+      .populate({
+        path: 'collaborationId',
+        populate: { path: 'opportunityId', select: 'title' }
+      })
       .sort({ createdAt: -1 })
     res.json(payments)
   } catch (err) {
     res.status(500).json({ message: 'Server error' })
   }
 })
-
 // Verify payment
 router.put('/payments/:id/verify', protect, adminOnly, async (req, res) => {
   try {

@@ -181,7 +181,7 @@ const getAllPayments = async (req, res) => {
   try {
     const payments = await Payment.find()
       .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName jazzCashNumber easypaisaNumber')
+      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber bankName bankAccountNumber bankAccountTitle')  // ← ye fields
       .populate({
         path: 'collaborationId',
         populate: { path: 'opportunityId', select: 'title' }
