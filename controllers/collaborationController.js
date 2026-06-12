@@ -170,9 +170,11 @@ const submitWork = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // ✅ Status check karo — active ya revision hona chahiye
+    // ✅ Status check karo — chatUnlocked remove karo
     if (!['active', 'revision'].includes(collaboration.status)) {
-      return res.status(400).json({ message: 'Collaboration is not active' });
+      return res.status(400).json({ 
+        message: `Cannot submit. Current status: ${collaboration.status}` 
+      });
     }
 
     collaboration.status        = 'submitted';
