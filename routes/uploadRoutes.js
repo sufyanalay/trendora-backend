@@ -1,8 +1,9 @@
-const express    = require('express')
-const router     = express.Router()
+const express  = require('express')
+const router   = express.Router()
 const { upload } = require('../config/cloudinary')
 const { protect } = require('../middleware/authMiddleware')
 
+// Single image upload
 router.post('/image', protect, upload.single('image'), (req, res) => {
   try {
     if (!req.file) {

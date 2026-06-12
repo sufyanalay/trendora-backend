@@ -4,8 +4,11 @@ const dotenv     = require('dotenv');
 const http       = require('http');
 const { Server } = require('socket.io');
 const connectDB  = require('./config/db');
-const cloudinary   = require('./config/cloudinary');
+
 dotenv.config();
+
+
+const cloudinary   = require('./config/cloudinary');
 connectDB();
 
 const app    = express();
