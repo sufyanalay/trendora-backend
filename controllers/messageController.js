@@ -1,26 +1,30 @@
 const Message       = require('../models/Message');
 const Collaboration = require('../models/Collaboration');
 
-// @GET /api/messages/:collaborationId — Messages lo
 const getMessages = async (req, res) => {
   try {
     const collaboration = await Collaboration.findById(req.params.collaborationId);
     if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' });
 
-    // Sirf involved parties dekh sakti hain
     const userId = req.user._id.toString();
     if (collaboration.brandId.toString() !== userId &&
-        collaboration.creatorId.toString() !== userId) {
+        collaboration.creatorId.toString() !== userId &&
+        req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    const messages = await Message.find({ collaborationId: req.params.collaborationId })
-      .populate('senderId', 'fullName role _id')  // ← _id explicitly
+    const messages = await Message.find({ 
+      collaborationId: req.params.collaborationId 
+    })
+      .populate('senderId', 'fullName role _id')
       .sort({ createdAt: 1 });
 
-    // Mark as read
     await Message.updateMany(
-      { collaborationId: req.params.collaborationId, receiverId: req.user._id, isRead: false },
+      { 
+        collaborationId: req.params.collaborationId, 
+        receiverId: req.user._id, 
+        isRead: false 
+      },
       { isRead: true }
     );
 
@@ -30,11 +34,11 @@ const getMessages = async (req, res) => {
   }
 };
 
-// @POST /api/messages/:collaborationId — Message bhejo
 const sendMessage = async (req, res) => {
   try {
     const { message } = req.body;
     const collaboration = await Collaboration.findById(req.params.collaborationId);
+
     if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' });
 
     const userId    = req.user._id.toString();
@@ -46,16 +50,17 @@ const sendMessage = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // Chat lock check — admin bypass kar sakta hai
+    // ✅ Chat lock check — sirf non-admin ke liye
     if (!collaboration.chatUnlocked && !isAdmin) {
-      return res.status(403).json({ message: 'Chat is locked. Payment must be verified first.' });
+      return res.status(403).json({ 
+        message: 'Chat is locked. Payment must be verified first.' 
+      });
     }
 
-    // Receiver ID
     let receiverId
     if (isBrand)        receiverId = collaboration.creatorId
     else if (isCreator) receiverId = collaboration.brandId
-    else                receiverId = collaboration.brandId // admin brand ko bheje default
+    else                receiverId = collaboration.brandId
 
     const newMessage = await Message.create({
       collaborationId: collaboration._id,
@@ -67,6 +72,7 @@ const sendMessage = async (req, res) => {
     const populated = await Message.findById(newMessage._id)
       .populate('senderId', 'fullName role _id')
 
+    // ✅ Socket emit
     if (global.io) {
       global.io.to(`collab_${collaboration._id}`).emit('new_message', populated);
     }
@@ -76,4 +82,5 @@ const sendMessage = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
 module.exports = { getMessages, sendMessage };

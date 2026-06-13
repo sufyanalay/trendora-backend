@@ -201,9 +201,25 @@ const submitWork = async (req, res) => {
 const approveWork = async (req, res) => {
   try {
     const collaboration = await Collaboration.findById(req.params.id);
-    if (!collaboration) return res.status(404).json({ message: 'Not found' });
+
+    if (!collaboration) {
+      return res.status(404).json({ message: 'Collaboration not found' });
+    }
+
+    console.log('approveWork called by:', req.user._id.toString())
+    console.log('collaboration brandId:', collaboration.brandId.toString())
+    console.log('status:', collaboration.status)
+
+    // ✅ Brand check
     if (collaboration.brandId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: 'Not authorized — you are not the brand' });
+    }
+
+    // ✅ Status check — sirf submitted ho to approve ho
+    if (collaboration.status !== 'submitted') {
+      return res.status(400).json({ 
+        message: `Cannot approve. Current status: ${collaboration.status}` 
+      });
     }
 
     collaboration.status        = 'completed';
@@ -211,13 +227,13 @@ const approveWork = async (req, res) => {
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
-    // ✅ Payment status bhi update karo — release ke liye ready
+    // ✅ Payment status verified karo — admin release ke liye
     await Payment.findOneAndUpdate(
       { collaborationId: collaboration._id },
-      { status: 'verified' }  // ← ab admin release kar sakta hai
+      { status: 'verified' }
     );
 
-    // Creator ko notify
+    // Creator notify
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
@@ -226,21 +242,31 @@ const approveWork = async (req, res) => {
       '/creator/earnings'
     );
 
-    // Admin ko notify
+    // Admin notify
     const User = require('../models/User');
     const admins = await User.find({ role: 'admin' });
     for (const admin of admins) {
       await createNotification(
         admin._id,
         '💰 Release Payment Now',
-        `Brand approved the work. Please release payment to creator.`,
+        'Brand approved the work. Please release payment to creator.',
         'payment',
         '/admin/payments'
       );
     }
 
+    // Socket emit
+    if (global.io) {
+      global.io.to(collaboration.creatorId.toString()).emit('collaboration_updated', {
+        collaborationId: collaboration._id.toString(),
+        status:          'completed',
+        chatUnlocked:    true,
+      });
+    }
+
     res.json(collaboration);
   } catch (err) {
+    console.error('approveWork error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };

@@ -150,7 +150,18 @@ router.put('/payments/:id/verify', protect, adminOnly, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
+// Fix old collaborations
+router.put('/fix-collaborations', protect, adminOnly, async (req, res) => {
+  try {
+    const result = await Collaboration.updateMany(
+      { status: { $in: ['active', 'submitted', 'completed', 'revision'] } },
+      { $set: { chatUnlocked: true } }
+    );
+    res.json({ message: 'Fixed', updated: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ message: 'Error' });
+  }
+});
 
 // Release payment
 router.put('/payments/:id/release', protect, adminOnly, async (req, res) => {
