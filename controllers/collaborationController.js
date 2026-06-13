@@ -201,79 +201,47 @@ const submitWork = async (req, res) => {
 const approveWork = async (req, res) => {
   try {
     const collaboration = await Collaboration.findById(req.params.id);
-
-    if (!collaboration) {
-      return res.status(404).json({ message: 'Collaboration not found' });
-    }
-
+    if (!collaboration) return res.status(404).json({ message: 'Not found' });
     if (collaboration.brandId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // Only submitted work can be approved
-    if (collaboration.status !== 'submitted') {
-      return res.status(400).json({
-        message: `Cannot approve collaboration in "${collaboration.status}" status`
-      });
-    }
-
-    const payment = await Payment.findOne({
-      collaborationId: collaboration._id
-    });
-
-    if (!payment) {
-      return res.status(404).json({
-        message: 'Payment record not found'
-      });
-    }
-
-    collaboration.status = 'completed';
-    collaboration.completedAt = new Date();
-    collaboration.paymentStatus = 'pending_release';
-
+    collaboration.status        = 'completed';
+    collaboration.completedAt   = new Date();
+    collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
-    payment.status = 'verified';
-    await payment.save();
+    // ✅ Payment status bhi update karo — release ke liye ready
+    await Payment.findOneAndUpdate(
+      { collaborationId: collaboration._id },
+      { status: 'verified' }  // ← ab admin release kar sakta hai
+    );
 
-    // Creator notification
+    // Creator ko notify
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
-      'Your submitted work has been approved. Payment is awaiting admin release.',
+      'Brand approved your work. Admin will release your payment soon.',
       'payment',
       '/creator/earnings'
     );
 
-    // Notify admins
+    // Admin ko notify
     const User = require('../models/User');
-
     const admins = await User.find({ role: 'admin' });
+    for (const admin of admins) {
+      await createNotification(
+        admin._id,
+        '💰 Release Payment Now',
+        `Brand approved the work. Please release payment to creator.`,
+        'payment',
+        '/admin/payments'
+      );
+    }
 
-    await Promise.all(
-      admins.map(admin =>
-        createNotification(
-          admin._id,
-          'Payment Release Required 💰',
-          `A completed collaboration requires payment release.`,
-          'payment',
-          '/admin/payments'
-        )
-      )
-    );
-
-    return res.json({
-      success: true,
-      message: 'Work approved successfully',
-      collaboration
-    });
-
+    res.json(collaboration);
   } catch (err) {
-    console.error('approveWork error:', err);
-    return res.status(500).json({
-      message: 'Server error',
-      error: err.message
-    });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 // @PUT /api/collaborations/:id/revision — Brand revision maange
