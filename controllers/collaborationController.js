@@ -4,25 +4,18 @@ const Opportunity    = require('../models/Opportunity');
 const Payment        = require('../models/Payment');
 const Notification   = require('../models/Notification');
 
-// collaborationController.js aur paymentController.js mein
 const createNotification = async (userId, title, message, type, link) => {
   try {
     const notif = await Notification.create({ userId, title, message, type, link });
-
-    // Socket emit
     if (global.io) {
       global.io.to(userId.toString()).emit('new_notification', notif);
-    }
-
-    if (['payment', 'collaboration'].includes(type)) {
-      await sendEmailNotification(userId, title, message)
     }
   } catch (err) {
     console.error('Notification error:', err.message);
   }
 };
 
-// @POST /api/collaborations — Brand accept kare
+// @POST /api/collaborations
 const createCollaboration = async (req, res) => {
   try {
     const { applicationId } = req.body;
@@ -42,11 +35,9 @@ const createCollaboration = async (req, res) => {
       return res.status(400).json({ message: 'Collaboration already exists' });
     }
 
-    // Application accept
     application.status = 'accepted';
     await application.save();
 
-    // Collaboration banao — status: payment_pending
     const collaboration = await Collaboration.create({
       opportunityId: application.opportunityId._id,
       applicationId: application._id,
@@ -56,9 +47,9 @@ const createCollaboration = async (req, res) => {
       deadline:      application.opportunityId.deadline,
       status:        'payment_pending',
       chatUnlocked:  false,
+      paymentStatus: 'pending',
     });
 
-    // Payment record banao
     const totalAmount        = collaboration.agreedAmount;
     const platformCommission = Math.round(totalAmount * 0.10);
     const creatorAmount      = totalAmount - platformCommission;
@@ -72,13 +63,11 @@ const createCollaboration = async (req, res) => {
       creatorAmount,
     });
 
-    // Opportunity close
     await Opportunity.findByIdAndUpdate(
       application.opportunityId._id,
       { status: 'closed' }
     );
 
-    // Baaki applications reject
     await Application.updateMany(
       {
         opportunityId: application.opportunityId._id,
@@ -88,7 +77,6 @@ const createCollaboration = async (req, res) => {
       { status: 'rejected' }
     );
 
-    // Rejected creators ko notification
     const rejectedApps = await Application.find({
       opportunityId: application.opportunityId._id,
       _id:           { $ne: applicationId },
@@ -97,13 +85,12 @@ const createCollaboration = async (req, res) => {
       await createNotification(
         app.creatorId,
         'Application Update',
-        `The opportunity "${application.opportunityId.title}" has been filled.`,
+        `The opportunity has been filled by another creator.`,
         'application',
         '/creator/applications'
       );
     }
 
-    // Brand ko payment reminder
     await createNotification(
       application.brandId,
       'Payment Required! 💳',
@@ -113,8 +100,8 @@ const createCollaboration = async (req, res) => {
     );
 
     res.status(201).json(collaboration);
-
   } catch (err) {
+    console.error('createCollaboration error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
@@ -165,15 +152,17 @@ const submitWork = async (req, res) => {
     const { submittedWork } = req.body;
     const collaboration = await Collaboration.findById(req.params.id);
 
-    if (!collaboration) return res.status(404).json({ message: 'Not found' });
+    if (!collaboration) {
+      return res.status(404).json({ message: 'Collaboration not found' });
+    }
     if (collaboration.creatorId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // ✅ Status check karo — chatUnlocked remove karo
+    // ✅ Sirf status check — chatUnlocked check hata diya
     if (!['active', 'revision'].includes(collaboration.status)) {
-      return res.status(400).json({ 
-        message: `Cannot submit. Current status: ${collaboration.status}` 
+      return res.status(400).json({
+        message: `Cannot submit. Status is: ${collaboration.status}`
       });
     }
 
@@ -185,14 +174,14 @@ const submitWork = async (req, res) => {
     await createNotification(
       collaboration.brandId,
       'Work Submitted! 📦',
-      'Creator has submitted the work. Please review and approve.',
+      'Creator has submitted the work. Please review and approve or request revision.',
       'collaboration',
       '/brand/collaborations'
     );
 
     res.json(collaboration);
   } catch (err) {
-    console.error('submitWork error:', err);
+    console.error('submitWork error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
@@ -200,50 +189,42 @@ const submitWork = async (req, res) => {
 // @PUT /api/collaborations/:id/approve — Brand approve
 const approveWork = async (req, res) => {
   try {
-    const collaboration = await Collaboration.findById(req.params.id)
-      .populate('brandId', '_id email fullName')
+    const collaboration = await Collaboration.findById(req.params.id);
 
     if (!collaboration) {
       return res.status(404).json({ message: 'Collaboration not found' });
     }
 
-    console.log('=== APPROVE DEBUG ===')
-    console.log('req.user._id:', req.user._id.toString())
-    console.log('req.user.role:', req.user.role)
-    console.log('collaboration.brandId:', collaboration.brandId)
-    console.log('collaboration.status:', collaboration.status)
+    // ✅ brandId string comparison
+    const collabBrandId = collaboration.brandId.toString();
+    const reqUserId     = req.user._id.toString();
 
-    // ✅ brandId object hai agar populate kiya — _id se compare karo
-    const brandId = collaboration.brandId._id
-      ? collaboration.brandId._id.toString()
-      : collaboration.brandId.toString()
-
-    if (brandId !== req.user._id.toString()) {
+    if (collabBrandId !== reqUserId) {
       return res.status(403).json({
-        message: 'Not authorized — you are not the brand',
-        debug: {
-          yourId:  req.user._id.toString(),
-          brandId: brandId,
-        }
+        message: 'Not authorized',
+        debug: { collabBrandId, reqUserId }
       });
     }
 
     if (collaboration.status !== 'submitted') {
       return res.status(400).json({
-        message: `Cannot approve. Current status: ${collaboration.status}`
+        message: `Cannot approve. Status is: ${collaboration.status}`
       });
     }
 
+    // ✅ paymentStatus enum mein 'paid' add ho gaya
     collaboration.status        = 'completed';
     collaboration.completedAt   = new Date();
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
+    // ✅ Payment record bhi update karo
     await Payment.findOneAndUpdate(
       { collaborationId: collaboration._id },
       { status: 'verified' }
     );
 
+    // Creator notify
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
@@ -252,6 +233,7 @@ const approveWork = async (req, res) => {
       '/creator/earnings'
     );
 
+    // Admin notify
     const User = require('../models/User');
     const admins = await User.find({ role: 'admin' });
     for (const admin of admins) {
@@ -264,6 +246,7 @@ const approveWork = async (req, res) => {
       );
     }
 
+    // Socket emit creator ko
     if (global.io) {
       global.io.to(collaboration.creatorId.toString()).emit('collaboration_updated', {
         collaborationId: collaboration._id.toString(),
@@ -278,14 +261,28 @@ const approveWork = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
-// @PUT /api/collaborations/:id/revision — Brand revision maange
+
+// @PUT /api/collaborations/:id/revision — Brand revision
 const requestRevision = async (req, res) => {
   try {
     const { revisionNote } = req.body;
     const collaboration = await Collaboration.findById(req.params.id);
-    if (!collaboration) return res.status(404).json({ message: 'Not found' });
-    if (collaboration.brandId.toString() !== req.user._id.toString()) {
+
+    if (!collaboration) {
+      return res.status(404).json({ message: 'Not found' });
+    }
+
+    const collabBrandId = collaboration.brandId.toString();
+    const reqUserId     = req.user._id.toString();
+
+    if (collabBrandId !== reqUserId) {
       return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    if (collaboration.status !== 'submitted') {
+      return res.status(400).json({
+        message: `Cannot request revision. Status is: ${collaboration.status}`
+      });
     }
 
     collaboration.status       = 'revision';
@@ -302,7 +299,8 @@ const requestRevision = async (req, res) => {
 
     res.json(collaboration);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error('requestRevision error:', err.message);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 
