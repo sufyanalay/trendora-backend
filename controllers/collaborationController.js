@@ -200,25 +200,37 @@ const submitWork = async (req, res) => {
 // @PUT /api/collaborations/:id/approve — Brand approve
 const approveWork = async (req, res) => {
   try {
-    const collaboration = await Collaboration.findById(req.params.id);
+    const collaboration = await Collaboration.findById(req.params.id)
+      .populate('brandId', '_id email fullName')
 
     if (!collaboration) {
       return res.status(404).json({ message: 'Collaboration not found' });
     }
 
-    console.log('approveWork called by:', req.user._id.toString())
-    console.log('collaboration brandId:', collaboration.brandId.toString())
-    console.log('status:', collaboration.status)
+    console.log('=== APPROVE DEBUG ===')
+    console.log('req.user._id:', req.user._id.toString())
+    console.log('req.user.role:', req.user.role)
+    console.log('collaboration.brandId:', collaboration.brandId)
+    console.log('collaboration.status:', collaboration.status)
 
-    // ✅ Brand check
-    if (collaboration.brandId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized — you are not the brand' });
+    // ✅ brandId object hai agar populate kiya — _id se compare karo
+    const brandId = collaboration.brandId._id
+      ? collaboration.brandId._id.toString()
+      : collaboration.brandId.toString()
+
+    if (brandId !== req.user._id.toString()) {
+      return res.status(403).json({
+        message: 'Not authorized — you are not the brand',
+        debug: {
+          yourId:  req.user._id.toString(),
+          brandId: brandId,
+        }
+      });
     }
 
-    // ✅ Status check — sirf submitted ho to approve ho
     if (collaboration.status !== 'submitted') {
-      return res.status(400).json({ 
-        message: `Cannot approve. Current status: ${collaboration.status}` 
+      return res.status(400).json({
+        message: `Cannot approve. Current status: ${collaboration.status}`
       });
     }
 
@@ -227,13 +239,11 @@ const approveWork = async (req, res) => {
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
-    // ✅ Payment status verified karo — admin release ke liye
     await Payment.findOneAndUpdate(
       { collaborationId: collaboration._id },
       { status: 'verified' }
     );
 
-    // Creator notify
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
@@ -242,7 +252,6 @@ const approveWork = async (req, res) => {
       '/creator/earnings'
     );
 
-    // Admin notify
     const User = require('../models/User');
     const admins = await User.find({ role: 'admin' });
     for (const admin of admins) {
@@ -255,7 +264,6 @@ const approveWork = async (req, res) => {
       );
     }
 
-    // Socket emit
     if (global.io) {
       global.io.to(collaboration.creatorId.toString()).emit('collaboration_updated', {
         collaborationId: collaboration._id.toString(),
