@@ -148,9 +148,29 @@ const verifyPayment = async (req, res) => {
 const releasePayment = async (req, res) => {
   try {
     const payment = await Payment.findById(req.params.id)
-      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber');
+      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber')
+      .populate('collaborationId');
 
     if (!payment) return res.status(404).json({ message: 'Not found' });
+
+    // ✅ CRITICAL CHECK: Admin can only release payment if brand approved the work
+    const collaboration = payment.collaborationId;
+    
+    if (collaboration.status !== 'completed') {
+      return res.status(403).json({
+        message: 'Cannot release payment - Brand has not approved the work yet',
+        currentStatus: collaboration.status,
+        requiredStatus: 'completed'
+      });
+    }
+
+    if (collaboration.paymentStatus !== 'paid') {
+      return res.status(403).json({
+        message: 'Cannot release payment - Payment not marked as paid by brand',
+        currentPaymentStatus: collaboration.paymentStatus,
+        requiredPaymentStatus: 'paid'
+      });
+    }
 
     payment.status     = 'released';
     payment.releasedAt = new Date();
@@ -162,15 +182,20 @@ const releasePayment = async (req, res) => {
     });
 
     // Creator ko notification
+    const creatorId = payment.creatorId._id;
     await createNotification(
-      payment.creatorId._id,
+      creatorId,
       'Payment Released! 💰',
-      `PKR ${payment.creatorAmount?.toLocaleString()} has been sent to your JazzCash account: ${payment.creatorId.jazzCashNumber || 'N/A'}`,
+      `PKR ${payment.creatorAmount?.toLocaleString()} has been sent to your account: ${payment.creatorId.jazzCashNumber || 'N/A'}`,
       'payment',
       '/creator/earnings'
     );
 
-    res.json({ message: 'Payment released!', payment });
+    // Admin ko confirmation
+    const adminMessage = `Payment of PKR ${payment.creatorAmount?.toLocaleString()} released to ${payment.creatorId.fullName}`;
+    console.log(`✅ ${adminMessage}`);
+
+    res.json({ message: 'Payment released successfully!', payment });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

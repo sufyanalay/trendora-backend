@@ -13,23 +13,48 @@ const getMessages = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
+    // ✅ Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // ✅ Get total count
+    const total = await Message.countDocuments({ 
+      collaborationId: req.params.collaborationId 
+    });
+
+    // ✅ Fetch messages with pagination
     const messages = await Message.find({ 
       collaborationId: req.params.collaborationId 
     })
-      .populate('senderId', 'fullName role _id')
+      .populate('senderId', 'fullName role _id profileImage')
+      .select('collaborationId senderId receiverId message isRead createdAt')
+      .lean()
+      .skip(skip)
+      .limit(limit)
       .sort({ createdAt: 1 });
 
-    await Message.updateMany(
+    // ✅ Mark as read in background (non-blocking)
+    Message.updateMany(
       { 
         collaborationId: req.params.collaborationId, 
         receiverId: req.user._id, 
         isRead: false 
       },
       { isRead: true }
-    );
+    ).catch(err => console.error('markAsRead error:', err.message));
 
-    res.json(messages);
+    res.json({
+      messages,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (err) {
+    console.error('getMessages error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -70,17 +95,56 @@ const sendMessage = async (req, res) => {
     });
 
     const populated = await Message.findById(newMessage._id)
-      .populate('senderId', 'fullName role _id')
+      .populate('senderId', 'fullName role _id profileImage')
 
-    // ✅ Socket emit
+    // ✅ Socket emit to collaboration room
     if (global.io) {
       global.io.to(`collab_${collaboration._id}`).emit('new_message', populated);
     }
 
     res.status(201).json(populated);
   } catch (err) {
+    console.error('sendMessage error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-module.exports = { getMessages, sendMessage };
+// ✅ NEW: Join collaboration socket room
+const joinCollaborationRoom = async (req, res) => {
+  try {
+    const { collaborationId } = req.params;
+    const collaboration = await Collaboration.findById(collaborationId).lean();
+
+    if (!collaboration) {
+      return res.status(404).json({ message: 'Collaboration not found' });
+    }
+
+    const userId = req.user._id.toString();
+    const isBrand = collaboration.brandId.toString() === userId;
+    const isCreator = collaboration.creatorId.toString() === userId;
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isBrand && !isCreator && !isAdmin) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    // ✅ Get unread count
+    const unreadCount = await Message.countDocuments({
+      collaborationId,
+      receiverId: req.user._id,
+      isRead: false
+    });
+
+    res.json({ 
+      message: 'Joined collaboration room',
+      roomId: `collab_${collaborationId}`,
+      unreadCount,
+      chatUnlocked: collaboration.chatUnlocked
+    });
+  } catch (err) {
+    console.error('joinCollaborationRoom error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { getMessages, sendMessage, joinCollaborationRoom };

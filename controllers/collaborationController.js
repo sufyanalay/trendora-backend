@@ -110,11 +110,14 @@ const createCollaboration = async (req, res) => {
 const getCreatorCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find({ creatorId: req.user._id })
-      .populate('opportunityId', 'title platform category')
-      .populate('brandId', 'fullName brandName email')
+      .populate('opportunityId', 'title platform category budget deadline')
+      .populate('brandId', 'fullName brandName email profileImage')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+      .lean()
       .sort({ createdAt: -1 });
     res.json(collaborations);
   } catch (err) {
+    console.error('getCreatorCollaborations error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -123,11 +126,14 @@ const getCreatorCollaborations = async (req, res) => {
 const getBrandCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find({ brandId: req.user._id })
-      .populate('opportunityId', 'title platform category')
-      .populate('creatorId', 'fullName email socialPlatform')
+      .populate('opportunityId', 'title platform category budget deadline')
+      .populate('creatorId', 'fullName email socialPlatform profileImage')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+      .lean()
       .sort({ createdAt: -1 });
     res.json(collaborations);
   } catch (err) {
+    console.error('getBrandCollaborations error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -136,12 +142,15 @@ const getBrandCollaborations = async (req, res) => {
 const getAllCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find()
-      .populate('opportunityId', 'title')
-      .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName')
+      .populate('opportunityId', 'title platform')
+      .populate('brandId', 'fullName brandName email')
+      .populate('creatorId', 'fullName email')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedAt completedAt chatUnlocked paymentStatus createdAt')
+      .lean()
       .sort({ createdAt: -1 });
     res.json(collaborations);
   } catch (err) {
+    console.error('getAllCollaborations error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -194,7 +203,7 @@ const approveWork = async (req, res) => {
     if (!collaboration) {
       return res.status(404).json({ message: 'Collaboration not found' });
     }
-res.json({ ...collaboration.toObject(), canReview: true });
+
     // ✅ brandId string comparison
     const collabBrandId = collaboration.brandId.toString();
     const reqUserId     = req.user._id.toString();
@@ -208,54 +217,67 @@ res.json({ ...collaboration.toObject(), canReview: true });
 
     if (collaboration.status !== 'submitted') {
       return res.status(400).json({
-        message: `Cannot approve. Status is: ${collaboration.status}`
+        message: `Cannot approve. Status is: ${collaboration.status}`,
+        info: 'Please wait for creator to submit work'
       });
     }
 
-    // ✅ paymentStatus enum mein 'paid' add ho gaya
+    // ✅ Verify payment was verified before approving work
+    if (collaboration.paymentStatus !== 'paid' || !collaboration.chatUnlocked) {
+      return res.status(403).json({
+        message: 'Cannot approve work - Payment must be verified and chat unlocked first',
+        paymentStatus: collaboration.paymentStatus,
+        chatUnlocked: collaboration.chatUnlocked
+      });
+    }
+
+    // ✅ Brand approves: Set status to completed and paymentStatus to paid
     collaboration.status        = 'completed';
     collaboration.completedAt   = new Date();
     collaboration.paymentStatus = 'paid';
     await collaboration.save();
 
-    // ✅ Payment record bhi update karo
+    // ✅ Update Payment record status to verified (for admin reference)
     await Payment.findOneAndUpdate(
       { collaborationId: collaboration._id },
       { status: 'verified' }
     );
 
-    // Creator notify
+    // Creator notify - Payment is ready to be released
     await createNotification(
       collaboration.creatorId,
       'Work Approved! ✅',
-      'Brand approved your work. Admin will release your payment soon.',
+      'Brand approved your work. Admin will now release your payment.',
       'payment',
       '/creator/earnings'
     );
 
-    // Admin notify
+    // Admin notify - Ready to release payment
     const User = require('../models/User');
     const admins = await User.find({ role: 'admin' });
     for (const admin of admins) {
       await createNotification(
         admin._id,
-        '💰 Release Payment Now',
-        'Brand approved the work. Please release payment to creator.',
+        '💰 Release Payment Ready',
+        'Brand approved the work. You can now release payment to creator.',
         'payment',
         '/admin/payments'
       );
     }
 
-    // Socket emit creator ko
+    // Socket emit to creator
     if (global.io) {
       global.io.to(collaboration.creatorId.toString()).emit('collaboration_updated', {
         collaborationId: collaboration._id.toString(),
         status:          'completed',
-        chatUnlocked:    true,
+        paymentReady:    true,
       });
     }
 
-    res.json(collaboration);
+    res.json({
+      message: 'Work approved! Admin can now release payment.',
+      collaboration
+    });
   } catch (err) {
     console.error('approveWork error:', err.message);
     res.status(500).json({ message: 'Server error', error: err.message });

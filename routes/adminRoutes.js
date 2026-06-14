@@ -67,11 +67,14 @@ router.get('/collaborations', protect, adminOnly, async (req, res) => {
   try {
     const collabs = await Collaboration.find()
       .populate('opportunityId', 'title platform')
-      .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName')
+      .populate('brandId', 'fullName brandName email')
+      .populate('creatorId', 'fullName email')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedAt completedAt chatUnlocked paymentStatus createdAt')
+      .lean()
       .sort({ createdAt: -1 })
     res.json(collabs)
   } catch (err) {
+    console.error('admin/collaborations error:', err.message)
     res.status(500).json({ message: 'Server error' })
   }
 })
@@ -83,15 +86,18 @@ router.get('/collaborations', protect, adminOnly, async (req, res) => {
 router.get('/payments', protect, adminOnly, async (req, res) => {
   try {
     const payments = await Payment.find()
-      .populate('brandId', 'fullName brandName')
-      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber bankName bankAccountNumber bankAccountTitle')  // ← ye fields add karo
+      .populate('brandId', 'fullName brandName email')
+      .populate('creatorId', 'fullName email jazzCashNumber easypaisaNumber bankName bankAccountNumber bankAccountTitle')
       .populate({
         path: 'collaborationId',
         populate: { path: 'opportunityId', select: 'title' }
       })
+      .select('collaborationId brandId creatorId totalAmount platformCommission creatorAmount screenshotUrl transactionId status verifiedAt releasedAt createdAt')
+      .lean()
       .sort({ createdAt: -1 })
     res.json(payments)
   } catch (err) {
+    console.error('admin/payments error:', err.message)
     res.status(500).json({ message: 'Server error' })
   }
 })
