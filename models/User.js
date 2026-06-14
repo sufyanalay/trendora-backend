@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema({
   isVerified:         { type: Boolean, default: false },
   verificationCode:   { type: String },
   verificationExpire: { type: Date },
+  averageRating: { type: Number, default: 0 },
+totalReviews:  { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

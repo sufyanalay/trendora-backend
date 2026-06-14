@@ -194,7 +194,7 @@ const approveWork = async (req, res) => {
     if (!collaboration) {
       return res.status(404).json({ message: 'Collaboration not found' });
     }
-
+res.json({ ...collaboration.toObject(), canReview: true });
     // ✅ brandId string comparison
     const collabBrandId = collaboration.brandId.toString();
     const reqUserId     = req.user._id.toString();
