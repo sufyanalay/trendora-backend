@@ -326,6 +326,53 @@ const requestRevision = async (req, res) => {
   }
 };
 
+// @DELETE /api/collaborations/:id — Cancel collaboration
+const deleteCollaboration = async (req, res) => {
+  try {
+    const collaboration = await Collaboration.findById(req.params.id);
+
+    if (!collaboration) {
+      return res.status(404).json({ message: 'Collaboration not found' });
+    }
+
+    // ✅ Only creator or brand can delete
+    const isCreator = collaboration.creatorId.toString() === req.user._id.toString();
+    const isBrand = collaboration.brandId.toString() === req.user._id.toString();
+
+    if (!isCreator && !isBrand) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    // ✅ Cannot delete if work is submitted (mid-work)
+    if (collaboration.status === 'submitted') {
+      return res.status(400).json({
+        message: `Cannot delete - work is under review`
+      });
+    }
+
+    const otherUserId = isCreator ? collaboration.brandId : collaboration.creatorId;
+
+    // ✅ Mark as cancelled
+    collaboration.status = 'cancelled';
+    await collaboration.save();
+
+    // Notify other user
+    const userRole = isCreator ? 'Creator' : 'Brand';
+    await createNotification(
+      otherUserId,
+      'Collaboration Cancelled ❌',
+      `${userRole} has cancelled the collaboration.`,
+      'collaboration',
+      isCreator ? '/brand/collaborations' : '/creator/collaborations'
+    );
+
+    res.json({ message: 'Collaboration cancelled', collaboration });
+  } catch (err) {
+    console.error('deleteCollaboration error:', err.message);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
 module.exports = {
   createCollaboration,
   getCreatorCollaborations,
@@ -334,4 +381,5 @@ module.exports = {
   submitWork,
   approveWork,
   requestRevision,
+  deleteCollaboration,
 };

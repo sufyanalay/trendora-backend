@@ -8,6 +8,7 @@ const {
   submitWork,
   approveWork,
   requestRevision,
+  deleteCollaboration,
 } = require('../controllers/collaborationController');
 const { protect } = require('../middleware/authMiddleware');
 const { adminOnly } = require('../middleware/authMiddleware');
@@ -19,5 +20,6 @@ router.get('/admin',           protect, adminOnly, getAllCollaborations);
 router.put('/:id/submit',      protect, submitWork);
 router.put('/:id/approve',     protect, approveWork);
 router.put('/:id/revision',    protect, requestRevision);
+router.delete('/:id',          protect, deleteCollaboration);
 
 module.exports = router;
