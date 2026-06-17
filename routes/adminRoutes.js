@@ -7,6 +7,7 @@ const Opportunity   = require('../models/Opportunity')
 const Collaboration = require('../models/Collaboration')
 const Payment       = require('../models/Payment')
 const Notification  = require('../models/Notification')
+const Dispute = require('../models/Dispute')
 
 // ─── USERS ───────────────────────────────────────────
 
@@ -79,9 +80,100 @@ router.get('/collaborations', protect, adminOnly, async (req, res) => {
   }
 })
 
+
+
+// Get all disputes
+router.get('/disputes', protect, adminOnly, async (req, res) => {
+  try {
+    const disputes = await Dispute.find()
+      .populate('brandId', 'fullName brandName email')
+      .populate('creatorId', 'fullName email')
+      .populate({
+        path: 'collaborationId',
+        populate: { path: 'opportunityId', select: 'title' }
+      })
+      .sort({ createdAt: -1 })
+    res.json(disputes)
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// Resolve dispute
+router.put('/disputes/:id/resolve', protect, adminOnly, async (req, res) => {
+  try {
+    const { decision, resolution } = req.body
+    const dispute = await Dispute.findById(req.params.id)
+      .populate('brandId', 'fullName brandName')
+      .populate('creatorId', 'fullName')
+
+    if (!dispute) return res.status(404).json({ message: 'Dispute not found' })
+
+    dispute.status     = 'resolved'
+    dispute.decision   = decision
+    dispute.resolution = resolution
+    dispute.resolvedBy = req.user._id
+    dispute.resolvedAt = new Date()
+    await dispute.save()
+
+    // Payment action based on decision
+    const payment = await Payment.findOne({ collaborationId: dispute.collaborationId })
+    if (payment) {
+      if (decision === 'release') {
+        payment.status = 'verified' // Admin release karega
+        await payment.save()
+        await Collaboration.findByIdAndUpdate(dispute.collaborationId, {
+          status: 'completed', paymentStatus: 'paid'
+        })
+      } else if (decision === 'refund') {
+        payment.status = 'refunded'
+        await payment.save()
+        await Collaboration.findByIdAndUpdate(dispute.collaborationId, {
+          status: 'cancelled', paymentStatus: 'refunded'
+        })
+      }
+    }
+
+    // Brand notify
+    await Notification.create({
+      userId:  dispute.brandId._id,
+      title:   'Dispute Resolved ⚖️',
+      message: `Admin decision: ${decision}. ${resolution}`,
+      type:    'system',
+      link:    '/brand/collaborations',
+    })
+
+    // Creator notify
+    await Notification.create({
+      userId:  dispute.creatorId._id,
+      title:   'Dispute Resolved ⚖️',
+      message: `Admin decision: ${decision}. ${resolution}`,
+      type:    'system',
+      link:    '/creator/collaborations',
+    })
+
+    if (global.io) {
+      global.io.to(dispute.brandId._id.toString()).emit('new_notification', { title: 'Dispute Resolved', type: 'system' })
+      global.io.to(dispute.creatorId._id.toString()).emit('new_notification', { title: 'Dispute Resolved', type: 'system' })
+    }
+
+    res.json(dispute)
+  } catch (err) {
+    console.error('resolve dispute error:', err)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+
+
+
+
+
+
+
+
 // ─── PAYMENTS ─────────────────────────────────────────
 
-// All payments
 // All payments
 router.get('/payments', protect, adminOnly, async (req, res) => {
   try {
