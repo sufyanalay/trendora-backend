@@ -8,6 +8,8 @@ const Collaboration = require('../models/Collaboration')
 const Payment       = require('../models/Payment')
 const Notification  = require('../models/Notification')
 const Dispute = require('../models/Dispute')
+const Message = require('../models/Message')
+
 
 // ─── USERS ───────────────────────────────────────────
 
@@ -98,6 +100,83 @@ router.get('/disputes', protect, adminOnly, async (req, res) => {
     res.status(500).json({ message: 'Server error' })
   }
 })
+
+
+// ✅ Admin — Delete collaboration + messages
+router.delete('/collaborations/:id', protect, adminOnly, async (req, res) => {
+  try {
+    const collab = await Collaboration.findById(req.params.id)
+    if (!collab) return res.status(404).json({ message: 'Not found' })
+
+    // Sirf completed collaborations delete ho sakti hain
+    if (collab.status !== 'completed') {
+      return res.status(400).json({ message: 'Only completed collaborations can be deleted' })
+    }
+
+    // Messages delete karo
+    await Message.deleteMany({ collaborationId: req.params.id })
+
+    // Collaboration delete karo
+    await Collaboration.findByIdAndDelete(req.params.id)
+
+    res.json({ message: 'Collaboration and chat deleted successfully' })
+  } catch (err) {
+    console.error('delete collab error:', err)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// ✅ Admin — Force complete collaboration
+router.put('/collaborations/:id/complete', protect, adminOnly, async (req, res) => {
+  try {
+    const collab = await Collaboration.findByIdAndUpdate(
+      req.params.id,
+      { status: 'completed', completedAt: new Date() },
+      { new: true }
+    )
+    res.json(collab)
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// ✅ Admin — Cancel collaboration
+router.put('/collaborations/:id/cancel', protect, adminOnly, async (req, res) => {
+  try {
+    const collab = await Collaboration.findByIdAndUpdate(
+      req.params.id,
+      { status: 'cancelled' },
+      { new: true }
+    )
+
+    // Payment refund mark karo
+    await Payment.findOneAndUpdate(
+      { collaborationId: req.params.id },
+      { status: 'refunded' }
+    )
+
+    // Dono ko notify karo
+    await Notification.create({
+      userId:  collab.brandId,
+      title:   'Collaboration Cancelled',
+      message: 'Admin has cancelled this collaboration.',
+      type:    'system',
+      link:    '/brand/collaborations',
+    })
+    await Notification.create({
+      userId:  collab.creatorId,
+      title:   'Collaboration Cancelled',
+      message: 'Admin has cancelled this collaboration.',
+      type:    'system',
+      link:    '/creator/collaborations',
+    })
+
+    res.json(collab)
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
 
 // Resolve dispute
 router.put('/disputes/:id/resolve', protect, adminOnly, async (req, res) => {
