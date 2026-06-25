@@ -24,6 +24,8 @@ const userSchema = new mongoose.Schema({
   verificationExpire: { type: Date },
   averageRating: { type: Number, default: 0 },
 totalReviews:  { type: Number, default: 0 },
+withdrawCount:    { type: Number, default: 0 },
+withdrawBannedUntil: { type: Date },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
