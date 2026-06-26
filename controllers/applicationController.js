@@ -1,6 +1,6 @@
-const Application = require('../models/Application');
-const Opportunity = require('../models/Opportunity');
-const User        = require('../models/User');
+const Application = require("../models/Application");
+const Opportunity = require("../models/Opportunity");
+const User = require("../models/User");
 
 // @POST /api/applications
 const applyToOpportunity = async (req, res) => {
@@ -8,56 +8,67 @@ const applyToOpportunity = async (req, res) => {
     const { opportunityId, offerType, counterAmount, note } = req.body;
 
     const opportunity = await Opportunity.findById(opportunityId);
-    if (!opportunity) return res.status(404).json({ message: 'Opportunity not found' });
-    if (opportunity.status !== 'active') {
-      return res.status(400).json({ message: 'This opportunity is no longer active' });
+    if (!opportunity)
+      return res.status(404).json({ message: "Opportunity not found" });
+    if (opportunity.status !== "active") {
+      return res
+        .status(400)
+        .json({ message: "This opportunity is no longer active" });
     }
 
     // Already applied check
     const existing = await Application.findOne({
       opportunityId,
       creatorId: req.user._id,
-      status: { $nin: ['withdrawn', 'rejected'] }
+      status: { $nin: ["withdrawn", "rejected"] },
     });
     if (existing) {
-      return res.status(400).json({ message: 'You have already applied to this opportunity' });
+      return res
+        .status(400)
+        .json({ message: "You have already applied to this opportunity" });
     }
 
     // ✅ Withdraw ban check
-    const creator = await User.findById(req.user._id);
-    if (creator.withdrawBannedUntil && new Date() < creator.withdrawBannedUntil) {
-      const banDate = creator.withdrawBannedUntil.toLocaleDateString('en-PK')
-      return res.status(403).json({
-        message: `You are temporarily banned from applying due to too many withdrawals. Ban lifts on ${banDate}`
-      });
-    }
+    // const creator = await User.findById(req.user._id);
+    // if (
+    //   creator.withdrawBannedUntil &&
+    //   new Date() < creator.withdrawBannedUntil
+    // ) {
+    //   const banDate = creator.withdrawBannedUntil.toLocaleDateString("en-PK");
+    //   return res.status(403).json({
+    //     message: `You are temporarily banned from applying due to too many withdrawals. Ban lifts on ${banDate}`,
+    //   });
+    // }
 
     // ✅ Counter amount validation
-    if (offerType === 'counter') {
+    if (offerType === "counter") {
       if (!counterAmount || counterAmount <= 0) {
-        return res.status(400).json({ message: 'Counter amount must be greater than 0' });
+        return res
+          .status(400)
+          .json({ message: "Counter amount must be greater than 0" });
       }
       // Minimum 10% of budget
-      const minAmount = Math.floor(opportunity.budget * 0.10)
+      const minAmount = Math.floor(opportunity.budget * 0.1);
       if (counterAmount < minAmount) {
         return res.status(400).json({
-          message: `Counter amount must be at least PKR ${minAmount.toLocaleString()} (10% of budget)`
+          message: `Counter amount must be at least PKR ${minAmount.toLocaleString()} (10% of budget)`,
         });
       }
     }
 
     const application = await Application.create({
       opportunityId,
-      creatorId:     req.user._id,
-      brandId:       opportunity.brandId,
+      creatorId: req.user._id,
+      brandId: opportunity.brandId,
       offerType,
-      counterAmount: offerType === 'counter' ? counterAmount : opportunity.budget,
+      counterAmount:
+        offerType === "counter" ? counterAmount : opportunity.budget,
       note,
     });
 
     res.status(201).json(application);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
 
@@ -65,11 +76,14 @@ const applyToOpportunity = async (req, res) => {
 const getMyApplications = async (req, res) => {
   try {
     const applications = await Application.find({ creatorId: req.user._id })
-      .populate('opportunityId', 'title budget platform category deadline brandName')
+      .populate(
+        "opportunityId",
+        "title budget platform category deadline brandName",
+      )
       .sort({ createdAt: -1 });
     res.json(applications);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -77,12 +91,15 @@ const getMyApplications = async (req, res) => {
 const getBrandApplications = async (req, res) => {
   try {
     const applications = await Application.find({ brandId: req.user._id })
-      .populate('opportunityId', 'title budget platform category')
-      .populate('creatorId', 'fullName email socialPlatform socialProfileUrl averageRating totalReviews')
+      .populate("opportunityId", "title budget platform category")
+      .populate(
+        "creatorId",
+        "fullName email socialPlatform socialProfileUrl averageRating totalReviews",
+      )
       .sort({ createdAt: -1 });
     res.json(applications);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -92,26 +109,27 @@ const respondToApplication = async (req, res) => {
     const { action, counterAmount, note } = req.body;
     const application = await Application.findById(req.params.id);
 
-    if (!application) return res.status(404).json({ message: 'Application not found' });
+    if (!application)
+      return res.status(404).json({ message: "Application not found" });
     if (application.brandId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: "Not authorized" });
     }
 
-    if (action === 'accept') {
-      application.status = 'accepted';
-    } else if (action === 'reject') {
-      application.status = 'rejected';
-    } else if (action === 'counter') {
-      application.status            = 'countered';
-      application.lastCounterBy     = 'brand';
+    if (action === "accept") {
+      application.status = "accepted";
+    } else if (action === "reject") {
+      application.status = "rejected";
+    } else if (action === "counter") {
+      application.status = "countered";
+      application.lastCounterBy = "brand";
       application.lastCounterAmount = counterAmount;
-      application.lastCounterNote   = note;
+      application.lastCounterNote = note;
     }
 
     await application.save();
     res.json(application);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -119,39 +137,42 @@ const respondToApplication = async (req, res) => {
 const creatorRespond = async (req, res) => {
   try {
     const { action, counterAmount, note } = req.body;
-    const application = await Application.findById(req.params.id)
-      .populate('opportunityId', 'budget');
+    const application = await Application.findById(req.params.id).populate(
+      "opportunityId",
+      "budget",
+    );
 
-    if (!application) return res.status(404).json({ message: 'Application not found' });
+    if (!application)
+      return res.status(404).json({ message: "Application not found" });
     if (application.creatorId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: "Not authorized" });
     }
 
     // ✅ Counter min validation
-    if (action === 'counter') {
-      const minAmount = Math.floor(application.opportunityId.budget * 0.10)
+    if (action === "counter") {
+      const minAmount = Math.floor(application.opportunityId.budget * 0.1);
       if (!counterAmount || counterAmount < minAmount) {
         return res.status(400).json({
-          message: `Counter amount must be at least PKR ${minAmount.toLocaleString()} (10% of budget)`
+          message: `Counter amount must be at least PKR ${minAmount.toLocaleString()} (10% of budget)`,
         });
       }
     }
 
-    if (action === 'accept') {
-      application.status = 'accepted';
-    } else if (action === 'reject') {
-      application.status = 'rejected';
-    } else if (action === 'counter') {
-      application.status            = 'countered';
-      application.lastCounterBy     = 'creator';
+    if (action === "accept") {
+      application.status = "accepted";
+    } else if (action === "reject") {
+      application.status = "rejected";
+    } else if (action === "counter") {
+      application.status = "countered";
+      application.lastCounterBy = "creator";
       application.lastCounterAmount = counterAmount;
-      application.lastCounterNote   = note;
+      application.lastCounterNote = note;
     }
 
     await application.save();
     res.json(application);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -159,31 +180,35 @@ const creatorRespond = async (req, res) => {
 const editApplication = async (req, res) => {
   try {
     const { counterAmount, note } = req.body;
-    const application = await Application.findById(req.params.id)
-      .populate('opportunityId', 'budget');
+    const application = await Application.findById(req.params.id).populate(
+      "opportunityId",
+      "budget",
+    );
 
-    if (!application) return res.status(404).json({ message: 'Not found' });
+    if (!application) return res.status(404).json({ message: "Not found" });
     if (application.creatorId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: "Not authorized" });
     }
-    if (application.status !== 'pending') {
-      return res.status(400).json({ message: 'Can only edit pending applications' });
+    if (application.status !== "pending") {
+      return res
+        .status(400)
+        .json({ message: "Can only edit pending applications" });
     }
 
-    const minAmount = Math.floor(application.opportunityId.budget * 0.10)
+    const minAmount = Math.floor(application.opportunityId.budget * 0.1);
     if (counterAmount < minAmount) {
       return res.status(400).json({
-        message: `Amount must be at least PKR ${minAmount.toLocaleString()}`
+        message: `Amount must be at least PKR ${minAmount.toLocaleString()}`,
       });
     }
 
     application.counterAmount = counterAmount;
-    application.note          = note;
+    application.note = note;
     await application.save();
 
     res.json(application);
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -192,34 +217,38 @@ const withdrawApplication = async (req, res) => {
   try {
     const application = await Application.findById(req.params.id);
 
-    if (!application) return res.status(404).json({ message: 'Not found' });
+    if (!application) return res.status(404).json({ message: "Not found" });
     if (application.creatorId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: "Not authorized" });
     }
-    if (application.status === 'accepted') {
-      return res.status(400).json({ message: 'Cannot withdraw accepted application' });
+    if (application.status === "accepted") {
+      return res
+        .status(400)
+        .json({ message: "Cannot withdraw accepted application" });
     }
 
-    application.status = 'withdrawn';
+    application.status = "withdrawn";
     await application.save();
 
     // ✅ Withdraw count update — 3 bar withdraw kare to 7 din ban
     const creator = await User.findById(req.user._id);
     creator.withdrawCount = (creator.withdrawCount || 0) + 1;
 
-    if (creator.withdrawCount >= 3) {
-      creator.withdrawBannedUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      creator.withdrawCount       = 0
-    }
+    // if (creator.withdrawCount >= 30) {
+    //   creator.withdrawBannedUntil = new Date(
+    //     Date.now() + 7 * 24 * 60 * 60 * 1000,
+    //   );
+    //   creator.withdrawCount = 0;
+    // }
     await creator.save();
 
     res.json({
-      message:       'Application withdrawn',
+      message: "Application withdrawn",
       withdrawCount: creator.withdrawCount,
-      banned:        !!creator.withdrawBannedUntil,
+      banned: !!creator.withdrawBannedUntil,
     });
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -232,8 +261,6 @@ module.exports = {
   editApplication,
   withdrawApplication,
 };
-
-
 
 // const Application = require('../models/Application');
 // const Opportunity = require('../models/Opportunity');
@@ -403,4 +430,3 @@ module.exports = {
 //   creatorRespond,
 //   withdrawApplication,
 // };
-
