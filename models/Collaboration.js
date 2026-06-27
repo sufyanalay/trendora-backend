@@ -15,6 +15,12 @@ const collaborationSchema = new mongoose.Schema({
     default: 'payment_pending',
     index: true
   },
+  submittedFiles: [{
+  url:          { type: String },
+  originalName: { type: String },
+  type:         { type: String },
+  size:         { type: Number },
+}],
 
   submittedWork:  { type: String },
   submittedAt:    { type: Date },

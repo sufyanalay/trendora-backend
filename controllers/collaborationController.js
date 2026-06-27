@@ -107,12 +107,44 @@ const createCollaboration = async (req, res) => {
 };
 
 // @GET /api/collaborations/creator
+// const getCreatorCollaborations = async (req, res) => {
+//   try {
+//     const collaborations = await Collaboration.find({ creatorId: req.user._id })
+//       .populate('opportunityId', 'title platform category budget deadline')
+//       .populate('brandId', 'fullName brandName email profileImage')
+//       .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+//       .lean()
+//       .sort({ createdAt: -1 });
+//     res.json(collaborations);
+//   } catch (err) {
+//     console.error('getCreatorCollaborations error:', err.message);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// };
+
+// // @GET /api/collaborations/brand
+// const getBrandCollaborations = async (req, res) => {
+//   try {
+//     const collaborations = await Collaboration.find({ brandId: req.user._id })
+//       .populate('opportunityId', 'title platform category budget deadline')
+//       .populate('creatorId', 'fullName email socialPlatform profileImage')
+//       .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+//       .lean()
+//       .sort({ createdAt: -1 });
+//     res.json(collaborations);
+//   } catch (err) {
+//     console.error('getBrandCollaborations error:', err.message);
+//     res.status(500).json({ message: 'Server error' });
+//   }
+// };
+
+// @GET /api/collaborations/creator
 const getCreatorCollaborations = async (req, res) => {
   try {
     const collaborations = await Collaboration.find({ creatorId: req.user._id })
       .populate('opportunityId', 'title platform category budget deadline')
       .populate('brandId', 'fullName brandName email profileImage')
-      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedFiles submittedAt completedAt chatUnlocked paymentStatus revisionNote createdAt updatedAt')
       .lean()
       .sort({ createdAt: -1 });
     res.json(collaborations);
@@ -128,7 +160,7 @@ const getBrandCollaborations = async (req, res) => {
     const collaborations = await Collaboration.find({ brandId: req.user._id })
       .populate('opportunityId', 'title platform category budget deadline')
       .populate('creatorId', 'fullName email socialPlatform profileImage')
-      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedAt completedAt chatUnlocked paymentStatus createdAt updatedAt')
+      .select('opportunityId applicationId brandId creatorId agreedAmount deadline status submittedWork submittedFiles submittedAt completedAt chatUnlocked paymentStatus revisionNote createdAt updatedAt')
       .lean()
       .sort({ createdAt: -1 });
     res.json(collaborations);
@@ -137,7 +169,6 @@ const getBrandCollaborations = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
 // @GET /api/collaborations/admin
 const getAllCollaborations = async (req, res) => {
   try {
@@ -156,29 +187,70 @@ const getAllCollaborations = async (req, res) => {
 };
 
 // @PUT /api/collaborations/:id/submit — Creator work submit
+// const submitWork = async (req, res) => {
+//   try {
+//     const { submittedWork } = req.body;
+//     const collaboration = await Collaboration.findById(req.params.id);
+
+//     if (!collaboration) {
+//       return res.status(404).json({ message: 'Collaboration not found' });
+//     }
+//     if (collaboration.creatorId.toString() !== req.user._id.toString()) {
+//       return res.status(403).json({ message: 'Not authorized' });
+//     }
+
+//     // ✅ Sirf status check — chatUnlocked check hata diya
+//     if (!['active', 'revision'].includes(collaboration.status)) {
+//       return res.status(400).json({
+//         message: `Cannot submit. Status is: ${collaboration.status}`
+//       });
+//     }
+
+//     collaboration.status        = 'submitted';
+//     collaboration.submittedWork = submittedWork;
+//     collaboration.submittedAt   = new Date();
+//     await collaboration.save();
+
+//     await createNotification(
+//       collaboration.brandId,
+//       'Work Submitted! 📦',
+//       'Creator has submitted the work. Please review and approve or request revision.',
+//       'collaboration',
+//       '/brand/collaborations'
+//     );
+
+//     res.json(collaboration);
+//   } catch (err) {
+//     console.error('submitWork error:', err.message);
+//     res.status(500).json({ message: 'Server error', error: err.message });
+//   }
+// };
+
+
+
 const submitWork = async (req, res) => {
   try {
-    const { submittedWork } = req.body;
-    const collaboration = await Collaboration.findById(req.params.id);
+    const { submittedWork, submittedFiles } = req.body
+    const collaboration = await Collaboration.findById(req.params.id)
 
-    if (!collaboration) {
-      return res.status(404).json({ message: 'Collaboration not found' });
-    }
+    if (!collaboration) return res.status(404).json({ message: 'Collaboration not found' })
     if (collaboration.creatorId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized' });
+      return res.status(403).json({ message: 'Not authorized' })
     }
-
-    // ✅ Sirf status check — chatUnlocked check hata diya
     if (!['active', 'revision'].includes(collaboration.status)) {
-      return res.status(400).json({
-        message: `Cannot submit. Status is: ${collaboration.status}`
-      });
+      return res.status(400).json({ message: `Cannot submit. Status is: ${collaboration.status}` })
     }
 
-    collaboration.status        = 'submitted';
-    collaboration.submittedWork = submittedWork;
-    collaboration.submittedAt   = new Date();
-    await collaboration.save();
+    // ✅ Text link ya files — koi bhi ek hona chahiye
+    if (!submittedWork?.trim() && (!submittedFiles || submittedFiles.length === 0)) {
+      return res.status(400).json({ message: 'Please provide work link or upload files' })
+    }
+
+    collaboration.status         = 'submitted'
+    collaboration.submittedWork  = submittedWork || ''
+    collaboration.submittedFiles = submittedFiles || []
+    collaboration.submittedAt    = new Date()
+    await collaboration.save()
 
     await createNotification(
       collaboration.brandId,
@@ -186,15 +258,14 @@ const submitWork = async (req, res) => {
       'Creator has submitted the work. Please review and approve or request revision.',
       'collaboration',
       '/brand/collaborations'
-    );
+    )
 
-    res.json(collaboration);
+    res.json(collaboration)
   } catch (err) {
-    console.error('submitWork error:', err.message);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('submitWork error:', err.message)
+    res.status(500).json({ message: 'Server error', error: err.message })
   }
-};
-
+}
 // @PUT /api/collaborations/:id/approve — Brand approve
 const approveWork = async (req, res) => {
   try {
